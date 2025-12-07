@@ -23,8 +23,8 @@ MAIN CORE - V5.0 - DUAL CORE & HIGH FREQUENCY PHYSICS
 // UPDATED PPR SETTINGS
 #define PPR_ENGINE 58         // 60-2 Trigger Wheel
 #define PPR_OUT_SHAFT 24
-#define PPR_TURBINE_N2 1      // Check if this is actually higher (e.g. 2 or 12)
-#define PPR_TURBINE_N3 1
+#define PPR_TURBINE_N2 60      // Check if this is actually higher (e.g. 2 or 12)
+#define PPR_TURBINE_N3 60
 
 #define TIRE_CIRCUMFERENCE_M 2.0
 #define FINAL_DRIVE_RATIO 3.27
