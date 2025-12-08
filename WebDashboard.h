@@ -84,6 +84,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         <option value="1">Upshift 2 -> 3</option>
         <option value="2">Upshift 3 -> 4</option>
         <option value="3">Upshift 4 -> 5</option>
+        <option value="4">Downshift 2 -> 1</option> 
         <option value="5">Downshift 3 -> 2</option>
         <option value="6">Downshift 4 -> 3</option>
         <option value="7">Downshift 5 -> 4</option>
@@ -262,5 +263,6 @@ void setupWebInterface() {
   Serial.println("Web Dashboard V5 Ready (Core 0)");
 }
 void handleWebInterface() { server.handleClient(); }
+
 
 #endif
