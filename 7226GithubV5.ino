@@ -33,27 +33,32 @@ const float N2_N3_GEAR_RATIO[5] = { 2.370f, 1.520f, 1.000f, 0.780f, 0.650f };
 const float INPUT_RPM_EMA_ALPHA = 0.3f; 
 
 // Pins
-const int MPC_SOL = 12; // Line Pressure
-const int SPC_SOL = 23; // Shift Pressure
-const int SOL_12  = 4;
-const int SOL_23  = 19;
+// Solenoids / PWM outputs
+const int MPC_SOL = 25; // Line Pressure
+const int SPC_SOL = 26; // Shift Pressure
+const int SOL_12  = 27;
+const int SOL_23  = 14;
 const int SOL_34  = 18;
-const int SOL_TCC = 13; // Torque Converter
+const int SOL_TCC = 19; // Torque Converter
 
+// Speed / turbine / rpm pulse sensors
 const int N2_SEN    = 32;
 const int N3_SEN    = 33;
 const int OUT_SPEED = 34;
 const int ENGINE_RPM_SEN = 35;
 
-const int TEMP_SEN  = 5;
-const int TPS       = 6;
-const int UP_SHIFT  = 2;
-const int DN_SHIFT  = 3;
+// Analog sensors
+const int TPS       = 36;
+const int TEMP_SEN  = 39;
 
-const int SHIFTER_P_PIN = 14;
-const int SHIFTER_R_PIN = 25;
-const int SHIFTER_N_PIN = 26;
-const int SHIFTER_D_PIN = 27;
+// Shifter / user switches
+const int UP_SHIFT  = 21;
+const int DN_SHIFT  = 22;
+
+const int SHIFTER_P_PIN = 5;
+const int SHIFTER_R_PIN = 17;
+const int SHIFTER_N_PIN = 16;
+const int SHIFTER_D_PIN = 13;
 
 // ---------------- THREADING & SHARED DATA ------------------------------------
 TaskHandle_t WebTask;
