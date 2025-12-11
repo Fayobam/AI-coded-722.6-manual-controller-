@@ -364,7 +364,18 @@ ShifterPosition readShifterPosition(){
     return SH_POS_SIGNAL_NA;
 }
 
-// Bilinear Interpolation Helper for smooth map lookups
+/**
+ * Bilinear Interpolation Helper for smooth map lookups
+ * 
+ * Performs bilinear interpolation on an 8x8 map using TPS percentage and engine RPM.
+ * This provides smoother transitions between map cells, avoiding abrupt changes
+ * in pressure control that can occur with direct array indexing.
+ * 
+ * @param map The 8x8 int16_t map to interpolate (e.g., FILL_duty, SHIFT_duty)
+ * @param tpsPercent Throttle position as a percentage (0-100)
+ * @param rpm Engine RPM value
+ * @return Interpolated value as a float
+ */
 float getInterpolatedMap(int16_t map[8][8], float tpsPercent, int rpm) {
     // Map TPS (0-100%) to continuous float index (0.0 - 7.0)
     float tpsIndexFloat = constrain((tpsPercent / 100.0f) * 7.0f, 0.0f, 7.0f);
@@ -517,6 +528,12 @@ const int FLARE_THRESHOLD=600;
 const int BIND_THRESHOLD=50;
 const int SOFT_TOLERANCE_MS=120;
 const int HARD_TOLERANCE_MS=-120;
+
+// Active Flare Protection Constants
+const float MIN_OUTPUT_RPM_FOR_FLARE_DETECTION = 50.0f;
+const float FLARE_DETECTION_RPM_THRESHOLD = 500.0f;
+const int FLARE_PROTECTION_SPC_BOOST = 25;
+const unsigned long FLARE_DETECTION_DELAY_MS = 100;
 
 float computeSlip(float inRpm,float outRpm,int targetGear){
     if(targetGear<1||targetGear>5) return 9999.0f;
@@ -757,15 +774,15 @@ void performShiftStateMachine(){
 
         // Active Flare Protection - Detect RPM flares during upshifts
         unsigned long holdingDuration = now - shiftSM.stateStart;
-        if(!shiftSM.flareProtectionActive && holdingDuration > 100) {
+        if(!shiftSM.flareProtectionActive && holdingDuration > FLARE_DETECTION_DELAY_MS) {
             // Check if this is an upshift (target gear > current gear)
-            if(shiftSM.expectedTargetGear > currentGear && outputRPM > 50.0f) {
+            if(shiftSM.expectedTargetGear > currentGear && outputRPM > MIN_OUTPUT_RPM_FOR_FLARE_DETECTION) {
                 // Calculate target input RPM based on output RPM and target gear ratio
                 float targetInputRPM = outputRPM * gearboxBounds[shiftSM.expectedTargetGear - 1].ratio;
                 // Detect flare: input RPM exceeds target by threshold
-                if(inputRPM > targetInputRPM + 500.0f) {
+                if(inputRPM > targetInputRPM + FLARE_DETECTION_RPM_THRESHOLD) {
                     // Boost SPC pressure to arrest the slip
-                    shiftSM.shift_duty = constrain(shiftSM.shift_duty + 25, 0, 255);
+                    shiftSM.shift_duty = constrain(shiftSM.shift_duty + FLARE_PROTECTION_SPC_BOOST, 0, 255);
                     setPWM(SPC_SOL, shiftSM.shift_duty);
                     shiftSM.flareProtectionActive = true;
                     DBG("Flare detected! Boosting SPC to %d\n", shiftSM.shift_duty);
