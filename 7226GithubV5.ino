@@ -364,8 +364,39 @@ ShifterPosition readShifterPosition(){
     return SH_POS_SIGNAL_NA;
 }
 
+// Bilinear Interpolation Helper for smooth map lookups
+float getInterpolatedMap(int16_t map[8][8], float tpsPercent, int rpm) {
+    // Map TPS (0-100%) to continuous float index (0.0 - 7.0)
+    float tpsIndexFloat = constrain((tpsPercent / 100.0f) * 7.0f, 0.0f, 7.0f);
+    // Map RPM to continuous float index (0.0 - 7.0)
+    float rpmIndexFloat = constrain(((float)(rpm - RPM_MIN) / (float)(RPM_MAX - RPM_MIN)) * 7.0f, 0.0f, 7.0f);
+    
+    // Get integer indices and fractional parts
+    int tpsIdx0 = (int)tpsIndexFloat;
+    int tpsIdx1 = min(tpsIdx0 + 1, 7);
+    float tpsFrac = tpsIndexFloat - (float)tpsIdx0;
+    
+    int rpmIdx0 = (int)rpmIndexFloat;
+    int rpmIdx1 = min(rpmIdx0 + 1, 7);
+    float rpmFrac = rpmIndexFloat - (float)rpmIdx0;
+    
+    // Get the four corner values
+    float v00 = (float)map[tpsIdx0][rpmIdx0];
+    float v01 = (float)map[tpsIdx0][rpmIdx1];
+    float v10 = (float)map[tpsIdx1][rpmIdx0];
+    float v11 = (float)map[tpsIdx1][rpmIdx1];
+    
+    // Bilinear interpolation
+    float v0 = v00 * (1.0f - rpmFrac) + v01 * rpmFrac;
+    float v1 = v10 * (1.0f - rpmFrac) + v11 * rpmFrac;
+    float result = v0 * (1.0f - tpsFrac) + v1 * tpsFrac;
+    
+    return result;
+}
+
 void controlTCC(){
-    if(currentGear>=3 && transTemp>=60){
+    // TCC Unlock Safety Interlock - Disable TCC during ANY shift event
+    if(!normalShifting && !garageShifting && currentGear>=3 && transTemp>=60){
         int duty = generalMaps.TCC_duty[tpsIndex][rpmIndex];
         setPWM(SOL_TCC, duty);
     } else {
@@ -609,6 +640,7 @@ struct ShiftSM{
     unsigned long lastSample=0;
     float peakSlip=0.0f;
     float finalSlip=0.0f;
+    bool flareProtectionActive=false;  // Track if flare protection was triggered
 } shiftSM;
 
 void performShiftInit(int mapIdx,int solenoidPin,int expectedGear){
@@ -621,11 +653,13 @@ void performShiftInit(int mapIdx,int solenoidPin,int expectedGear){
     shiftSM.shiftStart=shiftSM.stateStart;
     shiftSM.confirmationHits=0;
     
-    shiftSM.fill_duty = shiftMaps[mapIdx].FILL_duty[tpsIndex][rpmIndex];
-    shiftSM.shift_duty = shiftMaps[mapIdx].SHIFT_duty[tpsIndex][rpmIndex];
+    // Use bilinear interpolation for smoother pressure transitions
+    shiftSM.fill_duty = (int)getInterpolatedMap(shiftMaps[mapIdx].FILL_duty, tpsPercentage, engineRPM);
+    shiftSM.shift_duty = (int)getInterpolatedMap(shiftMaps[mapIdx].SHIFT_duty, tpsPercentage, engineRPM);
     
     shiftSM.lastSample=0;
     shiftSM.peakSlip=0; shiftSM.finalSlip=0;
+    shiftSM.flareProtectionActive=false;
 
     setPWM(SPC_SOL, shiftSM.fill_duty); 
     int mpc = generalMaps.LINE_duty[tpsIndex][rpmIndex];
@@ -720,6 +754,24 @@ void performShiftStateMachine(){
         setPWM(SPC_SOL, shiftSM.shift_duty);
         int verify_timeout = shiftMaps[shiftSM.mapIndex].SHIFT_time[tpsIndex][rpmIndex];
         verify_timeout = constrain(verify_timeout, 300, 2000);
+
+        // Active Flare Protection - Detect RPM flares during upshifts
+        unsigned long holdingDuration = now - shiftSM.stateStart;
+        if(!shiftSM.flareProtectionActive && holdingDuration > 100) {
+            // Check if this is an upshift (target gear > current gear)
+            if(shiftSM.expectedTargetGear > currentGear && outputRPM > 50.0f) {
+                // Calculate target input RPM based on output RPM and target gear ratio
+                float targetInputRPM = outputRPM * gearboxBounds[shiftSM.expectedTargetGear - 1].ratio;
+                // Detect flare: input RPM exceeds target by threshold
+                if(inputRPM > targetInputRPM + 500.0f) {
+                    // Boost SPC pressure to arrest the slip
+                    shiftSM.shift_duty = constrain(shiftSM.shift_duty + 25, 0, 255);
+                    setPWM(SPC_SOL, shiftSM.shift_duty);
+                    shiftSM.flareProtectionActive = true;
+                    DBG("Flare detected! Boosting SPC to %d\n", shiftSM.shift_duty);
+                }
+            }
+        }
 
         if(now - shiftSM.lastSample >= 50){
             shiftSM.lastSample=now;
