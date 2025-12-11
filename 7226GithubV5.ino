@@ -775,8 +775,10 @@ void performShiftStateMachine(){
         // Active Flare Protection - Detect RPM flares during upshifts
         unsigned long holdingDuration = now - shiftSM.stateStart;
         if(!shiftSM.flareProtectionActive && holdingDuration > FLARE_DETECTION_DELAY_MS) {
-            // Check if this is an upshift (target gear > current gear)
-            if(shiftSM.expectedTargetGear > currentGear && outputRPM > MIN_OUTPUT_RPM_FOR_FLARE_DETECTION) {
+            // Check if this is an upshift (target gear > current gear) and gear is valid
+            if(shiftSM.expectedTargetGear > currentGear && 
+               shiftSM.expectedTargetGear >= 1 && shiftSM.expectedTargetGear <= 5 &&
+               outputRPM > MIN_OUTPUT_RPM_FOR_FLARE_DETECTION) {
                 // Calculate target input RPM based on output RPM and target gear ratio
                 float targetInputRPM = outputRPM * gearboxBounds[shiftSM.expectedTargetGear - 1].ratio;
                 // Detect flare: input RPM exceeds target by threshold
