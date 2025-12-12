@@ -192,6 +192,18 @@ int16_t temp_gain[4] = { 350, 200, 130, 100 }; // x100 gains (3.50, 2.00, 1.30, 
 // Observed shift times (last good) per map/tps/rpm
 uint16_t observedShiftMs[8][8][8] = {0};
 
+// Closed-loop slip control constants (P-only, bounded)
+const float SLIP_TARGET_MIN_CL    = 80.0f;
+const float SLIP_TARGET_MID_CL    = 120.0f;
+const float SLIP_TARGET_MAX_CL    = 220.0f;   // clamp threshold during control
+const float SLIP_HARD_IGNORE      = 3000.0f;  // ignore absurd spikes
+const float Kp_spc = 0.04f;  // PWM per rpm error for SPC
+const float Kp_mpc = 0.02f;  // PWM per rpm error for MPC
+const int   SPC_STEP_CLAMP  = 8;   // max PWM step per update
+const int   MPC_STEP_CLAMP  = 4;
+const int   SPC_HEADROOM    = 40;  // around base map value
+const int   MPC_HEADROOM    = 30;  // around base map value
+
 void loadTempScale() {
     if (!tempPrefs.begin("tcu-temp", true)) return;
     if (tempPrefs.isKey("bp0")) {
@@ -214,6 +226,9 @@ void setPWM(int pin, int duty) {
     else if(pin == SPC_SOL) live_SPC = duty;
     else if(pin == SOL_TCC) live_TCC = duty;
 }
+
+// helper clamp
+static inline int clampInt(int v, int lo, int hi){ return (v<lo)?lo:((v>hi)?hi:v); }
 
 ShifterPosition shifter_pos = SH_POS_SIGNAL_NA;
 unsigned long shifter_debounce_ms = 50;
@@ -747,6 +762,9 @@ struct ShiftSM{
     unsigned long lastSample=0;
     float peakSlip=0.0f;
     float finalSlip=0.0f;
+    // Closed-loop cmds (per-shift)
+    int spc_cmd=0;
+    int mpc_cmd=0;
 } shiftSM;
 
 void performShiftInit(int mapIdx,int solenoidPin,int expectedGear){
@@ -765,6 +783,10 @@ void performShiftInit(int mapIdx,int solenoidPin,int expectedGear){
     
     shiftSM.lastSample=0;
     shiftSM.peakSlip=0; shiftSM.finalSlip=0;
+
+    // Initialize per-shift commands from map
+    shiftSM.spc_cmd = shiftSM.shift_duty;
+    shiftSM.mpc_cmd = shiftSM.shift_mpc_duty;
 
     setPWM(SPC_SOL, shiftSM.fill_duty); 
     setPWM(MPC_SOL, shiftSM.shift_mpc_duty);
@@ -855,9 +877,7 @@ void performShiftStateMachine(){
     }
     
     if(shiftSM.state==SM_HOLDING){
-        setPWM(SPC_SOL, shiftSM.shift_duty);
-        setPWM(MPC_SOL, shiftSM.shift_mpc_duty);
-
+        // Apply closed-loop slip control every 50 ms (reuse existing cadence)
         if(now - shiftSM.lastSample >= 50){
             shiftSM.lastSample=now;
             float slip=computeSlip(inputRPM,outputRPM,shiftSM.expectedTargetGear);
@@ -872,7 +892,30 @@ void performShiftStateMachine(){
                 shiftSM.state=SM_VERIFY;
                 shiftSM.stateStart=now;
             }
+
+            // Closed-loop slip adjust (bounded P)
+            if(slip > 0 && slip < SLIP_HARD_IGNORE && outputRPM > 50 && inputRPM > 100){
+                float err = slip - SLIP_TARGET_MID_CL;
+                int base_spc = shiftSM.shift_duty;
+                int base_mpc = shiftSM.shift_mpc_duty;
+
+                int delta_spc = clampInt((int)(Kp_spc * err), -SPC_STEP_CLAMP, SPC_STEP_CLAMP);
+                int delta_mpc = clampInt((int)(Kp_mpc * err), -MPC_STEP_CLAMP, MPC_STEP_CLAMP);
+
+                shiftSM.spc_cmd = clampInt(shiftSM.spc_cmd + delta_spc,
+                                           clampInt(base_spc - SPC_HEADROOM,0,255),
+                                           clampInt(base_spc + SPC_HEADROOM,0,255));
+
+                shiftSM.mpc_cmd = clampInt(shiftSM.mpc_cmd + delta_mpc,
+                                           clampInt(base_mpc - MPC_HEADROOM,0,255),
+                                           clampInt(base_mpc + MPC_HEADROOM,0,255));
+            }
         }
+
+        // Apply current commands (closed-loop adjusted)
+        setPWM(SPC_SOL, shiftSM.spc_cmd);
+        setPWM(MPC_SOL, shiftSM.mpc_cmd);
+
         if(now - shiftSM.shiftStart >= SHIFT_TIMEOUT_MS){
             setPWM(shiftSM.shiftSolenoidPin,0);
             setPWM(SPC_SOL,0);
@@ -939,6 +982,8 @@ void performShiftStateMachine(){
         shiftSM.shiftSolenoidPin=-1;
         shiftSM.expectedTargetGear=0;
         shiftSM.confirmationHits=0;
+        shiftSM.spc_cmd=0;
+        shiftSM.mpc_cmd=0;
     }
 }
 
