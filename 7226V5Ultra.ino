@@ -1013,24 +1013,28 @@ void handleShifterChange(ShifterPosition last, ShifterPosition now){
 }
 
 // V5: Telemetry reads from Shared Volatile vars (Safe for Core 0)
+// FIXED: Uses snprintf to prevent String memory fragmentation/crashes
 String getExtendedTelemetryJSON() {
-    String j = "{";
-    // Read protected data
-    if(xSemaphoreTake(dataMutex, 50) == pdTRUE) {
-        j += "\"rpm\":" + String(shared_engineRPM) + ",";
-        j += "\"spd\":" + String(shared_vehicleSpeed, 1) + ",";
-        j += "\"tps\":" + String(shared_tpsPercentage, 0) + ",";
-        j += "\"tmp\":" + String(shared_transTemp, 0) + ",";
-        j += "\"gr\":" + String(shared_currentGear) + ",";
-        j += "\"inRpm\":" + String(shared_inputRPM, 0) + ",";
-        j += "\"outRpm\":" + String(shared_outputRPM, 0) + ",";
-        xSemaphoreGive(dataMutex);
-    } else {
-        // Fallback if mutex busy
-        j += "\"rpm\":0,\"spd\":0,\"gr\":99,";
-    }
+    char buf[512]; // Fixed buffer, no heap fragmentation
     
-    String sState = "IDLE";
+    int rpm=0, tMin=0, tMax=0, gr=99;
+    float spd=0, tps=0, tmp=0, inRpm=0, outRpm=0;
+    
+    // Read protected data quickly
+    if(xSemaphoreTake(dataMutex, 10) == pdTRUE) {
+        rpm = shared_engineRPM;
+        spd = shared_vehicleSpeed;
+        tps = shared_tpsPercentage;
+        tmp = shared_transTemp;
+        gr = shared_currentGear;
+        inRpm = shared_inputRPM;
+        outRpm = shared_outputRPM;
+        tMin = tpsMin;
+        tMax = tpsMax;
+        xSemaphoreGive(dataMutex);
+    }
+
+    const char* sState = "IDLE";
     if(garageShifting) sState = "GARAGE";
     else {
         switch(shiftSM.state){
@@ -1042,17 +1046,19 @@ String getExtendedTelemetryJSON() {
             default: break;
         }
     }
-    j += "\"sState\":\"" + sState + "\",";
-    j += "\"lTime\":" + String(lastShiftDuration) + ",";
-    j += "\"mpc\":" + String(live_MPC) + ",";
-    j += "\"spc\":" + String(live_SPC) + ",";
-    j += "\"tcc\":" + String(live_TCC) + ",";
-    j += "\"ti\":" + String(tpsIndex) + ",";
-    j += "\"ri\":" + String(rpmIndex) + ",";
-    j += "\"uptime\":" + String(millis());
-    j += "}";
-    return j;
+    
+    // Format safely into buffer
+    snprintf(buf, sizeof(buf), 
+        "{\"rpm\":%d,\"spd\":%.1f,\"tps\":%.0f,\"tmp\":%.0f,\"gr\":%d,\"inRpm\":%.0f,\"outRpm\":%.0f,"
+        "\"tMin\":%d,\"tMax\":%d,\"mpc\":%d,\"spc\":%d,\"tcc\":%d,"
+        "\"ti\":%d,\"ri\":%d,\"uptime\":%lu,\"sState\":\"%s\",\"lTime\":%lu}",
+        rpm, spd, tps, tmp, gr, inRpm, outRpm, tMin, tMax,
+        live_MPC, live_SPC, live_TCC, tpsIndex, rpmIndex, millis(), sState, lastShiftDuration
+    );
+    
+    return String(buf);
 }
+
 
 // WEB SERVER TASK (Core 0)
 void WebServerTask(void * parameter) {
