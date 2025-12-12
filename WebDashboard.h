@@ -15,6 +15,14 @@ extern struct GeneralMaps generalMaps;
 extern void persistMapsBinary();
 extern String getExtendedTelemetryJSON();
 
+// Temp scale externs
+extern int16_t temp_bp[4];
+extern int16_t temp_gain[4];
+extern void saveTempScale();
+
+// Observed shift times (last good) extern
+extern uint16_t observedShiftMs[8][8][8];
+
 // Web server instance
 WebServer server(80);
 
@@ -48,6 +56,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     #uptime { position:absolute; top:5px; right:10px; font-size:12px; color:#00ff88; pointer-events:none; }
     #editModal { display:none; position:fixed; top:20%; left:10%; right:10%; background:#222; padding:20px; border:2px solid #00d4ff; z-index:99; }
     input { width: 80%; padding: 10px; background: #000; color: #fff; border: 1px solid #555; font-size: 18px; text-align: center; }
+    .card input { width: 60px; margin: 3px; padding: 6px; }
   </style>
 </head>
 <body>
@@ -84,7 +93,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         <option value="1">Upshift 2 -> 3</option>
         <option value="2">Upshift 3 -> 4</option>
         <option value="3">Upshift 4 -> 5</option>
-        <option value="4">Downshift 2 -> 1</option> 
+        <option value="4">Downshift 2 -> 1</option>
         <option value="5">Downshift 3 -> 2</option>
         <option value="6">Downshift 4 -> 3</option>
         <option value="7">Downshift 5 -> 4</option>
@@ -95,6 +104,13 @@ const char index_html[] PROGMEM = R"rawliteral(
     <table id="mapTable"></table>
     <br>
     <button class="save" onclick="saveToFlash()">SAVE TO FLASH</button>
+
+    <div class="card" style="margin-top:10px;">
+      <div class="lbl">TEMP SCALER (°C breakpoints / gain x100)</div>
+      <div>BP: <input id="bp0"><input id="bp1"><input id="bp2"><input id="bp3"></div>
+      <div>GN: <input id="gn0"><input id="gn1"><input id="gn2"><input id="gn3"></div>
+      <button onclick="pushTemp()">SET TEMP SCALE</button>
+    </div>
   </div>
 
   <div id="editModal">
@@ -151,7 +167,9 @@ function updateTblOpts() {
     t.innerHTML += '<option value="0">Fill Time (ms)</option>';
     t.innerHTML += '<option value="1">Fill Duty (PWM)</option>';
     t.innerHTML += '<option value="2">Shift Duty (PWM)</option>';
-    t.innerHTML += '<option value="3">Shift Timeout (ms)</option>';
+    t.innerHTML += '<option value="3">Shift MPC Duty (PWM)</option>';
+    t.innerHTML += '<option value="4">Target Shift Time (ms)</option>';
+    t.innerHTML += '<option value="5">Observed Shift Time (last good, ms)</option>';
   }
 }
 document.getElementById('mapSel').addEventListener('change', () => { updateTblOpts(); refreshMap(); });
@@ -194,9 +212,30 @@ function commit() {
   let v = document.getElementById('newVal').value;
   fetch(`/setmap?m=${m}&t=${t}&r=${curT}&c=${curR}&v=${v}`).then(r=>{
     if(r.ok) { refreshMap(); closeEdit(); }
+    else alert("Read-only table");
   });
 }
 function saveToFlash() { fetch('/save').then(r=>r.text()).then(t=>alert(t)); }
+
+// Temp scaler
+function loadTemp() {
+  fetch('/tempscale').then(r=>r.json()).then(d=>{
+    for(let i=0;i<4;i++){
+      document.getElementById('bp'+i).value = d.bp[i];
+      document.getElementById('gn'+i).value = d.gn[i];
+    }
+  });
+}
+function pushTemp() {
+  let qs = [];
+  for(let i=0;i<4;i++){
+    qs.push(`b${i}=${encodeURIComponent(document.getElementById('bp'+i).value)}`);
+    qs.push(`g${i}=${encodeURIComponent(document.getElementById('gn'+i).value)}`);
+  }
+  fetch('/tempscale?'+qs.join('&')).then(r=>r.text()).then(alert);
+}
+loadTemp();
+
 refreshMap();
 </script>
 </body>
@@ -205,6 +244,24 @@ refreshMap();
 
 void handleRoot() { server.send(200, "text/html", index_html); }
 void handleData() { server.send(200, "application/json", getExtendedTelemetryJSON()); }
+
+void handleTempScaleGet() {
+  String j = "{\"bp\":[";
+  for(int i=0;i<4;i++){ j += String(temp_bp[i]); if(i!=3) j+=','; }
+  j += "],\"gn\":[";
+  for(int i=0;i<4;i++){ j += String(temp_gain[i]); if(i!=3) j+=','; }
+  j += "]}";
+  server.send(200, "application/json", j);
+}
+void handleTempScaleSet() {
+  for(int i=0;i<4;i++){
+    if(server.hasArg("b"+String(i))) temp_bp[i]   = (int16_t)server.arg("b"+String(i)).toInt();
+    if(server.hasArg("g"+String(i))) temp_gain[i] = (int16_t)server.arg("g"+String(i)).toInt();
+  }
+  saveTempScale();
+  server.send(200, "text/plain", "Temp scale updated");
+}
+
 void handleGetMap() {
   if(!server.hasArg("m") || !server.hasArg("t")) { server.send(400); return; }
   int m = server.arg("m").toInt();
@@ -220,7 +277,9 @@ void handleGetMap() {
         if(t == 0) val = shiftMaps[m].FILL_time[row][col];
         else if(t == 1) val = shiftMaps[m].FILL_duty[row][col];
         else if(t == 2) val = shiftMaps[m].SHIFT_duty[row][col];
-        else if(t == 3) val = shiftMaps[m].SHIFT_time[row][col];
+        else if(t == 3) val = shiftMaps[m].SHIFT_MPC_duty[row][col];
+        else if(t == 4) val = shiftMaps[m].TARGET_SHIFT_time[row][col];
+        else if(t == 5) val = observedShiftMs[m][row][col]; // read-only observed
       }
       j += String(val);
       if(row!=7 || col!=7) j += ",";
@@ -236,6 +295,7 @@ void handleSetMap() {
     int r = server.arg("r").toInt();
     int c = server.arg("c").toInt();
     int v = server.arg("v").toInt();
+    if(t == 5) { server.send(403, "text/plain", "Read-only"); return; } // observed table read-only
     if(m == 99) {
         if(t == 0) generalMaps.LINE_duty[r][c] = v;
         else if(t == 1) generalMaps.TCC_duty[r][c] = v;
@@ -243,7 +303,8 @@ void handleSetMap() {
         if(t == 0) shiftMaps[m].FILL_time[r][c] = v;
         else if(t == 1) shiftMaps[m].FILL_duty[r][c] = v;
         else if(t == 2) shiftMaps[m].SHIFT_duty[r][c] = v;
-        else if(t == 3) shiftMaps[m].SHIFT_time[r][c] = v;
+        else if(t == 3) shiftMaps[m].SHIFT_MPC_duty[r][c] = v;
+        else if(t == 4) shiftMaps[m].TARGET_SHIFT_time[r][c] = v;
     }
     server.send(200, "text/plain", "OK");
     return;
@@ -251,6 +312,7 @@ void handleSetMap() {
   server.send(400, "text/plain", "Error");
 }
 void handleSave() { persistMapsBinary(); server.send(200, "text/plain", "V5 Maps Saved!"); }
+
 void setupWebInterface() {
   WiFi.mode(WIFI_AP);
   WiFi.softAP("MercedesTCU_V5", "72267226");
@@ -259,10 +321,11 @@ void setupWebInterface() {
   server.on("/getmap", handleGetMap);
   server.on("/setmap", handleSetMap);
   server.on("/save", handleSave);
+  server.on("/tempscale", HTTP_GET, handleTempScaleGet);
+  server.on("/tempscale", HTTP_ANY, handleTempScaleSet); // allow GET with params or POST
   server.begin();
   Serial.println("Web Dashboard V5 Ready (Core 0)");
 }
 void handleWebInterface() { server.handleClient(); }
-
 
 #endif
