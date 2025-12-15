@@ -38,20 +38,22 @@ const float INPUT_RPM_EMA_ALPHA = 0.3f;
 
 // ---------------- UPDATED PIN MAPPING (ESP32 DevKit V1) ----------------------
 // Solenoids / PWM outputs (Digital Output)
-const int MPC_SOL = 25; // Line Pressure (GPIO25)
-const int SPC_SOL = 26; // Shift Pressure (GPIO26)
-const int SOL_12  = 27; // Solenoid 1-2 (GPIO27)
-const int SOL_23  = 14; // Solenoid 2-3 (GPIO14)
+const int MPC_SOL = 26; // Line Pressure (GPIO25)
+const int SPC_SOL = 25; // Shift Pressure (GPIO26)
+const int SOL_12  = 14; // Solenoid 1-2 (GPIO27)
+const int SOL_23  = 19; // Solenoid 2-3 (GPIO14)
 const int SOL_34  = 18; // Solenoid 3-4 (GPIO18)
-const int SOL_TCC = 19; // Torque Converter (GPIO19)
+const int SOL_TCC = 27; // Torque Converter (GPIO19)
+
 
 // Speed / Turbine / RPM pulse sensors (PCNT Inputs)
 // NOTE: GPIO 34, 35, 36, 39 are INPUT ONLY. 
 // If using Open Collector/Hall sensors, you MUST add external physical pull-up resistors (4.7k-10k) to 3.3V.
-const int N2_SEN    = 32; // Input/Output pin (Internal pullup ok)
-const int N3_SEN    = 33; // Input/Output pin (Internal pullup ok)
-const int OUT_SPEED = 34; // Input Only - REQUIRES EXTERNAL PULLUP
-const int ENGINE_RPM_SEN = 35; // Input Only - REQUIRES EXTERNAL PULLUP
+const int N2_SEN    = 34; // Input/Output pin (Internal pullup ok)
+const int N3_SEN    = 35; // Input/Output pin (Internal pullup ok)
+const int OUT_SPEED = 32; // Input Only - REQUIRES EXTERNAL PULLUP
+const int ENGINE_RPM_SEN = 33; // Input Only - REQUIRES EXTERNAL PULLUP
+
 
 // Analog sensors (ADC1 - Safe for WiFi)
 const int TPS       = 36; // Input Only (VP)
@@ -67,11 +69,11 @@ const int DN_SHIFT  = 22; // Downshift (GPIO22)
 const int SHIFTER_PIN_A = 4;  
 const int SHIFTER_PIN_B = 16;
 const int SHIFTER_PIN_C = 17;
-const int SHIFTER_PIN_D = 13;
+const int SHIFTER_PIN_D = 5;
 
 // Active level config: Mercedes shifters are typically active-LOW (pull line to ground)
 // Set to false if your harness is truly active-HIGH.
-const bool SHIFTER_ACTIVE_LOW = true;
+const bool SHIFTER_ACTIVE_LOW = false;
 
 // ---------------- THREADING & SHARED DATA ------------------------------------
 TaskHandle_t WebTask;
